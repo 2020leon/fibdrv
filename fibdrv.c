@@ -19,6 +19,8 @@ MODULE_VERSION("0.1");
  */
 #define MAX_LENGTH 92
 
+#define clz(x) __builtin_clzll(x)
+
 static dev_t fib_dev = 0;
 static struct cdev *fib_cdev;
 static struct class *fib_class;
@@ -27,14 +29,23 @@ static DEFINE_MUTEX(fib_mutex);
 static long long fib_sequence(long long k)
 {
     long long a = 0, b = 1;
+    int k_clz = clz(k);
+
     if (k <= 1)
         return k;
-    for (long long i = k; i > 1; i--) {
-        k = a + b;
-        a = b;
-        b = k;
+    k <<= k_clz;
+    for (int i = sizeof(long long) * 8; i > k_clz; i--, k <<= 1) {
+        long long t1 = a * (2 * b - a);
+        long long t2 = b * b + a * a;
+        a = t1;
+        b = t2;
+        if (k & (long long) ~(~0ULL >> 1)) {
+            t1 = a + b;
+            a = b;
+            b = t1;
+        }
     }
-    return k;
+    return a;
 }
 
 static int fib_open(struct inode *inode, struct file *file)
