@@ -9,7 +9,7 @@ PWD := $(shell pwd)
 
 GIT_HOOKS := .git/hooks/applied
 
-all: $(GIT_HOOKS) client
+all: $(GIT_HOOKS) client $(TARGET_MODULE).ko
 	$(MAKE) -C $(KDIR) M=$(PWD) modules
 
 $(GIT_HOOKS):
@@ -19,13 +19,18 @@ $(GIT_HOOKS):
 clean:
 	$(MAKE) -C $(KDIR) M=$(PWD) clean
 	$(RM) client out
-load:
+
+load: $(TARGET_MODULE).ko
 	sudo insmod $(TARGET_MODULE).ko
+
 unload:
 	sudo rmmod $(TARGET_MODULE) || true >/dev/null
 
 client: client.c
 	$(CC) -o $@ $^
+
+$(TARGET_MODULE).ko:
+	$(MAKE) -C $(KDIR) M=$(PWD) modules
 
 PRINTF = env printf
 PASS_COLOR = \e[32;01m
