@@ -28,18 +28,15 @@ static DEFINE_MUTEX(fib_mutex);
 
 static long long fib_sequence(long long k)
 {
-    long long a = 0, b = 1;
-    int k_clz = clz(k);
-
     if (k <= 1)
         return k;
-    k <<= k_clz;
-    for (int i = sizeof(long long) * 8; i > k_clz; i--, k <<= 1) {
+    long long a = 0, b = 1;
+    for (int mask = 1 << (sizeof(long long) * 8 - 1 - clz(k)); mask > 0;
+         mask >>= 1) {
         long long t1 = a * (2 * b - a);
-        long long t2 = b * b + a * a;
+        b = b * b + a * a;
         a = t1;
-        b = t2;
-        if (k & (long long) ~(~0ULL >> 1)) {
+        if (k & mask) {
             t1 = a + b;
             a = b;
             b = t1;
