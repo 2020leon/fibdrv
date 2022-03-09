@@ -6,6 +6,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include "bignum.h"
 
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("National Cheng Kung University, Taiwan");
@@ -17,7 +18,8 @@ MODULE_VERSION("0.1");
 /* MAX_LENGTH is set to 92 because
  * ssize_t can't fit the number > 92
  */
-#define MAX_LENGTH 92
+// #define MAX_LENGTH 92
+#define MAX_LENGTH 368
 
 #define clz(x) __builtin_clzll(x)
 
@@ -26,23 +28,36 @@ static struct cdev *fib_cdev;
 static struct class *fib_class;
 static DEFINE_MUTEX(fib_mutex);
 
-static long long fib_sequence(long long k)
+static void fib_sequence(long long k, struct bignum *result)
 {
-    if (k <= 1)
-        return k;
-    long long a = 0, b = 1;
+    if (!result)
+        return;
+    if (k <= 1) {
+        bignum_from_int(result, k);
+        return;
+    }
+    struct bignum a, b;
+    bignum_from_int(&a, 0);
+    bignum_from_int(&b, 1);
     for (int mask = 1 << (sizeof(long long) * 8 - 1 - clz(k)); mask > 0;
          mask >>= 1) {
-        long long t1 = a * (2 * b - a);
-        b = b * b + a * a;
-        a = t1;
+        struct bignum t;
+        bignum_shl1(&b, &t, 0);
+        bignum_sub(&t, &a, &t);
+        bignum_mul(&t, &a, &t);
+
+        bignum_mul(&b, &b, &b);
+        bignum_mul(&a, &a, &a);
+        bignum_add(&a, &b, &b);
+
+        a = t;
         if (k & mask) {
-            t1 = a + b;
+            bignum_add(&a, &b, &t);
             a = b;
-            b = t1;
+            b = t;
         }
     }
-    return a;
+    *result = a;
 }
 
 static int fib_open(struct inode *inode, struct file *file)
@@ -66,9 +81,12 @@ static ssize_t fib_read(struct file *file,
                         size_t size,
                         loff_t *offset)
 {
-    if (size >= sizeof(long long)) {
-        *(long long *) buf = fib_sequence(*offset);
-        return (ssize_t) size;
+    if (size >= sizeof(struct bignum)) {
+        struct bignum fib;
+        fib_sequence(*offset, &fib);
+        if (copy_to_user(buf, &fib, sizeof(fib)) != 0)
+            return -1;
+        return (ssize_t) sizeof(fib);
     }
     return -1;
 }

@@ -4,6 +4,7 @@
 #include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include "bignum.h"
 
 #define FIB_DEV "/dev/fibonacci"
 
@@ -11,7 +12,8 @@ int main()
 {
     long long sz;
 
-    char buf[sizeof(long long)];
+    struct bignum fib;
+    char buf[9 * 9 + 1];
     char write_buf[] = "testing writing";
     int offset = 100; /* TODO: try test something bigger than the limit */
 
@@ -28,20 +30,22 @@ int main()
 
     for (int i = 0; i <= offset; i++) {
         lseek(fd, i, SEEK_SET);
-        sz = read(fd, buf, sizeof(buf));
+        sz = read(fd, &fib, sizeof(fib));
+        bignum_to_dec(&fib, buf, sizeof(buf));
         printf("Reading from " FIB_DEV
                " at offset %d, returned the sequence "
-               "%lld.\n",
-               i, *(long long *) buf);
+               "%s.\n",
+               i, buf);
     }
 
     for (int i = offset; i >= 0; i--) {
         lseek(fd, i, SEEK_SET);
-        sz = read(fd, buf, sizeof(buf));
+        sz = read(fd, &fib, sizeof(fib));
+        bignum_to_dec(&fib, buf, sizeof(buf));
         printf("Reading from " FIB_DEV
                " at offset %d, returned the sequence "
-               "%lld.\n",
-               i, *(long long *) buf);
+               "%s.\n",
+               i, buf);
     }
 
     close(fd);
