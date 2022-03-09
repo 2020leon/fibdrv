@@ -1,7 +1,8 @@
 CONFIG_MODULE_SIG = n
-TARGET_MODULE := fibdrv
+TARGET_MODULE := fibdrvmodule
 
 obj-m := $(TARGET_MODULE).o
+$(TARGET_MODULE)-objs := fibdrv.o bignum.o
 ccflags-y := -std=gnu99 -Wno-declaration-after-statement
 
 KDIR := /lib/modules/$(shell uname -r)/build
@@ -9,7 +10,7 @@ PWD := $(shell pwd)
 
 GIT_HOOKS := .git/hooks/applied
 
-all: $(GIT_HOOKS) client $(TARGET_MODULE).ko
+all: $(GIT_HOOKS) client
 	$(MAKE) -C $(KDIR) M=$(PWD) modules
 
 $(GIT_HOOKS):
@@ -26,7 +27,7 @@ load: $(TARGET_MODULE).ko
 unload:
 	sudo rmmod $(TARGET_MODULE) || true >/dev/null
 
-client: client.c
+client: client.c bignum.c
 	$(CC) -o $@ $^
 
 $(TARGET_MODULE).ko:
