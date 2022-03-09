@@ -66,7 +66,11 @@ static ssize_t fib_read(struct file *file,
                         size_t size,
                         loff_t *offset)
 {
-    return (ssize_t) fib_sequence(*offset);
+    if (size >= sizeof(long long)) {
+        *(long long *) buf = fib_sequence(*offset);
+        return (ssize_t) size;
+    }
+    return -1;
 }
 
 /* write operation is skipped */
