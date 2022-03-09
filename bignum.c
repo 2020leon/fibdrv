@@ -133,6 +133,7 @@ void bignum_mul(const struct bignum *a,
         bignum_neg(c, c);
 }
 
+// cppcheck-suppress unusedFunction
 void bignum_div(const struct bignum *a,
                 const struct bignum *b,
                 struct bignum *c)
