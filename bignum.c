@@ -22,6 +22,8 @@ static void bignum_divrem(const struct bignum *a,
                           struct bignum *c,
                           struct bignum *d);
 static int bignum_is_zero(const struct bignum *bignum);
+/* (a > b) - (a < b) */
+static int bignum_cmp(const struct bignum *a, const struct bignum *b);
 
 void bignum_init(struct bignum *bignum)
 {
@@ -110,7 +112,6 @@ void bignum_mul(const struct bignum *a,
 {
     if (!a || !b || !c)
         return;
-    uint64_t tmp;
     int sign = ((a->num_and_sign < 0) != (b->num_and_sign < 0));
     struct bignum abs_a, abs_b, big_tmp;
     bignum_abs(a, &abs_a);
@@ -118,16 +119,16 @@ void bignum_mul(const struct bignum *a,
     bignum_init(c);
     for (int i = 0; i < BN_ARRAY_SIZE; i++) {
         for (int j = 0; i + j <= BN_ARRAY_SIZE && j < BN_ARRAY_SIZE; j++) {
-            tmp = (uint64_t) abs_a.num[i] * abs_b.num[j];
-            bignum_from_uint_shift_unit(&big_tmp, tmp, i + j);
+            bignum_from_uint_shift_unit(
+                &big_tmp, (uint64_t) abs_a.num[i] * abs_b.num[j], i + j);
             bignum_add(c, &big_tmp, c);
         }
     }
-    tmp = (uint64_t) abs_a.num[0] * abs_b.num_and_sign;
-    bignum_from_uint_shift_unit(&big_tmp, tmp, BN_ARRAY_SIZE);
+    bignum_from_uint_shift_unit(
+        &big_tmp, (uint64_t) abs_a.num[0] * abs_b.num_and_sign, BN_ARRAY_SIZE);
     bignum_add(c, &big_tmp, c);
-    tmp = (uint64_t) abs_a.num_and_sign * abs_b.num[0];
-    bignum_from_uint_shift_unit(&big_tmp, tmp, BN_ARRAY_SIZE);
+    bignum_from_uint_shift_unit(
+        &big_tmp, (uint64_t) abs_a.num_and_sign * abs_b.num[0], BN_ARRAY_SIZE);
     bignum_add(c, &big_tmp, c);
     if (sign)
         bignum_neg(c, c);
@@ -236,16 +237,14 @@ static void bignum_divrem(const struct bignum *a,
 
     for (int i = 0; i < sizeof(struct bignum) * 8; i++) {
         // 2
-        bignum_sub(&rem, b, &rem);
-
-        if (rem.num_and_sign >= 0) {
+        if (bignum_cmp(&rem, b) >= 0) {
             // 3a
+            bignum_sub(&rem, b, &rem);
             carry = (quo.num_and_sign < 0);
             bignum_shl1(&quo, &quo, 1);
             bignum_shl1(&rem, &rem, carry);
         } else {
             // 3b
-            bignum_add(&rem, b, &rem);
             carry = (quo.num_and_sign < 0);
             bignum_shl1(&quo, &quo, 0);
             bignum_shl1(&rem, &rem, carry);
@@ -270,4 +269,18 @@ static int bignum_is_zero(const struct bignum *bignum)
             return 0;
     }
     return 1;
+}
+
+static int bignum_cmp(const struct bignum *a, const struct bignum *b)
+{
+    if (!a || !b)
+        return 0;
+    if (a->num_and_sign != b->num_and_sign)
+        return (a->num_and_sign > b->num_and_sign) -
+               (a->num_and_sign < b->num_and_sign);
+    for (int i = BN_ARRAY_SIZE - 1; i >= 0; i--) {
+        if (a->num[i] != b->num[i])
+            return (a->num[i] > b->num[i]) - (a->num[i] < b->num[i]);
+    }
+    return 0;
 }
