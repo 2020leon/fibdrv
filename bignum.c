@@ -119,9 +119,11 @@ void bignum_mul(const struct bignum *a,
     bignum_init(c);
     for (int i = 0; i < BN_ARRAY_SIZE; i++) {
         for (int j = 0; i + j <= BN_ARRAY_SIZE && j < BN_ARRAY_SIZE; j++) {
-            bignum_from_uint_shift_unit(
-                &big_tmp, (uint64_t) abs_a.num[i] * abs_b.num[j], i + j);
-            bignum_add(c, &big_tmp, c);
+            if (abs_a.num[i] && abs_b.num[j]) {
+                bignum_from_uint_shift_unit(
+                    &big_tmp, (uint64_t) abs_a.num[i] * abs_b.num[j], i + j);
+                bignum_add(c, &big_tmp, c);
+            }
         }
     }
     bignum_from_uint_shift_unit(
