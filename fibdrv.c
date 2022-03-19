@@ -8,6 +8,8 @@
 #include <linux/mutex.h>
 #include "bignum.h"
 
+#include "fibdrv.h"
+
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("National Cheng Kung University, Taiwan");
 MODULE_DESCRIPTION("Fibonacci engine driver");
@@ -28,7 +30,38 @@ static struct cdev *fib_cdev;
 static struct class *fib_class;
 static DEFINE_MUTEX(fib_mutex);
 
-static void fib_sequence(long long k, struct bignum *result)
+static enum fibdrv_mode mode = FIBDRV_BIGNUM_FAST;
+static ktime_t duration;
+
+static ssize_t bignum_fast_wrapper(struct file *file,
+                                   char *buf,
+                                   size_t size,
+                                   loff_t *offset);
+static ssize_t bignum_orig_wrapper(struct file *file,
+                                   char *buf,
+                                   size_t size,
+                                   loff_t *offset);
+static ssize_t ll_fast_wrapper(struct file *file,
+                               char *buf,
+                               size_t size,
+                               loff_t *offset);
+static ssize_t ll_orig_wrapper(struct file *file,
+                               char *buf,
+                               size_t size,
+                               loff_t *offset);
+static ssize_t time_wrapper(struct file *file,
+                            char *buf,
+                            size_t size,
+                            loff_t *offset);
+
+static ssize_t (*wrapper[FIBDRV_MODE_SIZE])(struct file *,
+                                            char *,
+                                            size_t,
+                                            loff_t *) = {
+    bignum_fast_wrapper, bignum_orig_wrapper, ll_fast_wrapper, ll_orig_wrapper,
+    time_wrapper};
+
+static void fib_bignum_fast(long long k, struct bignum *result)
 {
     if (!result)
         return;
@@ -60,6 +93,137 @@ static void fib_sequence(long long k, struct bignum *result)
     *result = a;
 }
 
+static ssize_t bignum_fast_wrapper(struct file *file,
+                                   char *buf,
+                                   size_t size,
+                                   loff_t *offset)
+{
+    ktime_t kt = ktime_get();
+    if (size >= sizeof(struct bignum)) {
+        struct bignum fib;
+        fib_bignum_fast(*offset, &fib);
+        unsigned long tmp = copy_to_user(buf, &fib, sizeof(fib));
+        duration = ktime_sub(ktime_get(), kt);
+        return tmp != 0 ? -1 : sizeof(fib);
+    }
+    duration = -1;
+    return -1;
+}
+
+static void fib_bignum_orig(long long k, struct bignum *result)
+{
+    if (!result)
+        return;
+    if (k <= 1) {
+        bignum_from_int(result, k);
+        return;
+    }
+    struct bignum a, b;
+    bignum_from_int(&a, 0);
+    bignum_from_int(&b, 1);
+    while (k > 1) {
+        bignum_add(&a, &b, result);
+        a = b;
+        b = *result;
+        k--;
+    }
+}
+
+static ssize_t bignum_orig_wrapper(struct file *file,
+                                   char *buf,
+                                   size_t size,
+                                   loff_t *offset)
+{
+    ktime_t kt = ktime_get();
+    if (size >= sizeof(struct bignum)) {
+        struct bignum fib;
+        fib_bignum_orig(*offset, &fib);
+        unsigned long tmp = copy_to_user(buf, &fib, sizeof(fib));
+        duration = ktime_sub(ktime_get(), kt);
+        return tmp != 0 ? -1 : sizeof(fib);
+    }
+    duration = -1;
+    return -1;
+}
+
+static long long fib_ll_fast(long long k)
+{
+    if (k <= 1)
+        return k;
+    long long a = 0, b = 1;
+    for (int mask = 1 << (sizeof(long long) * 8 - 1 - clz(k)); mask > 0;
+         mask >>= 1) {
+        long long t1 = a * (2 * b - a);
+        b = b * b + a * a;
+        a = t1;
+        if (k & mask) {
+            t1 = a + b;
+            a = b;
+            b = t1;
+        }
+    }
+    return a;
+}
+
+static ssize_t ll_fast_wrapper(struct file *file,
+                               char *buf,
+                               size_t size,
+                               loff_t *offset)
+{
+    ktime_t kt = ktime_get();
+    if (size >= sizeof(long long)) {
+        long long result = fib_ll_fast(*offset);
+        unsigned long tmp = copy_to_user(buf, &result, sizeof(long long));
+        duration = ktime_sub(ktime_get(), kt);
+        return tmp != 0 ? -1 : sizeof(long long);
+    }
+    duration = -1;
+    return -1;
+}
+
+
+static long long fib_ll_orig(long long k)
+{
+    long long a = 0, b = 1;
+    if (k <= 1)
+        return k;
+    for (long long i = k; i > 1; i--) {
+        k = a + b;
+        a = b;
+        b = k;
+    }
+    return k;
+}
+
+static ssize_t ll_orig_wrapper(struct file *file,
+                               char *buf,
+                               size_t size,
+                               loff_t *offset)
+{
+    ktime_t kt = ktime_get();
+    if (size >= sizeof(long long)) {
+        long long result = fib_ll_orig(*offset);
+        unsigned long tmp = copy_to_user(buf, &result, sizeof(long long));
+        duration = ktime_sub(ktime_get(), kt);
+        return tmp != 0 ? -1 : sizeof(long long);
+    }
+    duration = -1;
+    return -1;
+}
+
+static ssize_t time_wrapper(struct file *file,
+                            char *buf,
+                            size_t size,
+                            loff_t *offset)
+{
+    if (size >= sizeof(ktime_t)) {
+        if (copy_to_user(buf, &duration, sizeof(ktime_t)) != 0)
+            return -1;
+        return sizeof(ktime_t);
+    }
+    return -1;
+}
+
 static int fib_open(struct inode *inode, struct file *file)
 {
     if (!mutex_trylock(&fib_mutex)) {
@@ -81,14 +245,7 @@ static ssize_t fib_read(struct file *file,
                         size_t size,
                         loff_t *offset)
 {
-    if (size >= sizeof(struct bignum)) {
-        struct bignum fib;
-        fib_sequence(*offset, &fib);
-        if (copy_to_user(buf, &fib, sizeof(fib)) != 0)
-            return -1;
-        return (ssize_t) sizeof(fib);
-    }
-    return -1;
+    return wrapper[mode](file, buf, size, offset);
 }
 
 /* write operation is skipped */
@@ -97,6 +254,11 @@ static ssize_t fib_write(struct file *file,
                          size_t size,
                          loff_t *offset)
 {
+    if (size == sizeof(mode) && *(enum fibdrv_mode *) buf < FIBDRV_MODE_SIZE) {
+        if (copy_from_user(&mode, buf, sizeof(mode)) != 0)
+            return -1;
+    } else
+        mode = FIBDRV_BIGNUM_FAST;
     return 1;
 }
 
